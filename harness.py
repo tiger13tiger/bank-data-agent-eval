@@ -348,7 +348,8 @@ def write_report(s, g_rows, s_rows, fails, agent_name, out_dir: Path):
 
 
 # --------------------------------------------------------------------------- reusable entry points
-SUITES = {"basic": ["golden_set.jsonl"], "hard": ["hard_set.jsonl"], "all": ["golden_set.jsonl", "hard_set.jsonl"]}
+SUITES = {"basic": ["golden_set.jsonl"], "hard": ["hard_set.jsonl"], "extended": ["extended_set.jsonl"],
+          "all": ["golden_set.jsonl", "hard_set.jsonl", "extended_set.jsonl"]}
 
 
 def load_suite(name: str) -> list[dict]:
@@ -393,7 +394,8 @@ def add_common_args(ap):
     ap.add_argument("--price-in", type=float, default=None, help="USD per 1M input tokens")
     ap.add_argument("--price-out", type=float, default=None, help="USD per 1M output tokens")
     ap.add_argument("--pace", type=float, default=0.0, help="seconds between calls (free tiers)")
-    ap.add_argument("--suite", choices=list(SUITES), default="basic")
+    ap.add_argument("--suite", choices=list(SUITES), default="basic",
+                    help="basic (20) | hard (12) | extended (177, generated) | all (209)")
     ap.add_argument("--prompt-file", default=None,
                     help="system prompt file; 'base' = original hand-written prompt (default: live prompt)")
 

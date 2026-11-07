@@ -13,7 +13,7 @@ on:
       repeats:
         default: "2"
       suite:
-        description: "basic | hard | all"
+        description: "basic | hard | extended | all"
         default: "basic"
       prompt:
         description: "System prompt: live | base (original hand-written)"
