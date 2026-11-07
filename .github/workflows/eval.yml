@@ -1,0 +1,60 @@
+name: agent-eval
+on:
+  pull_request:
+    paths: ["agents.py", "guardrails.py", "data/**", "harness.py"]
+  workflow_dispatch:
+    inputs:
+      agent:
+        description: "mock | deepseek | openai | gemini | claude"
+        default: "mock"
+      model:
+        description: "Optional model id; blank = provider default"
+        default: ""
+      repeats:
+        default: "2"
+      suite:
+        description: "basic | hard | all"
+        default: "basic"
+      prompt:
+        description: "System prompt: live | base (original hand-written)"
+        default: "live"
+      pace:
+        description: "Seconds between calls (use 4+ on free tiers)"
+        default: "0"
+permissions:
+  contents: read
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install openai anthropic
+      - name: Evaluator regression tests
+        run: python tests/test_scoring.py
+      - name: Run eval (non-zero exit fails the run / PR)
+        run: |
+          MODEL="${{ inputs.model }}"
+          python harness.py --agent "${{ inputs.agent || 'mock' }}" \
+                            ${MODEL:+--model "$MODEL"} \
+                            --repeats "${{ inputs.repeats || '2' }}" \
+                            --pace "${{ inputs.pace || '0' }}" \
+                            --suite "${{ inputs.suite || 'basic' }}" \
+                            ${{ inputs.prompt == 'base' && '--prompt-file base' || '' }}
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      - name: Publish report to run summary
+        if: always()
+        run: |
+          cat reports/report.md >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || echo "No report" >> "$GITHUB_STEP_SUMMARY"
+          cat reports/report.md 2>/dev/null || true
+          echo "----- golden_results.csv -----"; cat reports/golden_results.csv 2>/dev/null || true
+          echo "----- safety_results.csv -----"; cat reports/safety_results.csv 2>/dev/null || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: eval-report, path: reports/ }
