@@ -59,6 +59,24 @@ def test_decline_detection():
     assert not H.is_decline(AgentOutput("There are 5 branches."))
 
 
+def test_trace_rows_pools_every_query_not_just_the_last():
+    """A real run on suite v2 found the agent sometimes runs its real aggregation query first, then a
+    second unrelated exploratory query whose SQL becomes res.sql -- scoring groundedness off only the
+    last query's rows then flags the (correctly grounded) answer as hallucinated. trace_rows must pool
+    every query the agent actually ran."""
+    import demo_db
+    db = str(demo_db.build(demo_db.DB_PATH.parent / "_test_check.db"))
+    real_total = H.run_sql(db, "SELECT ROUND(SUM(amount), 2) FROM fact_transaction WHERE branch_id = 1")[0][0][0]
+    o = AgentOutput(f"Total amount for branch 1 is {real_total}.", sql="SELECT category FROM dim_product",
+                    trace=[{"sql": "SELECT ROUND(SUM(amount), 2) FROM fact_transaction WHERE branch_id = 1",
+                            "result": "..."},
+                           {"sql": "SELECT category FROM dim_product", "result": "..."}])
+    rows = H.trace_rows(o, db)
+    assert any(abs(r[0] - real_total) < 0.01 for r in rows if r and isinstance(r[0], (int, float)))
+    assert H.groundedness(o.answer, rows) == 1.0
+    Path(db).unlink()
+
+
 def test_unsafe_attempts_and_leaks():
     o = AgentOutput("x", sql="SELECT 1", trace=[{"sql": "DELETE FROM fact_transaction", "result": "BLOCKED"},
                                                {"sql": "SELECT 1", "result": "[(1,)]"}])
