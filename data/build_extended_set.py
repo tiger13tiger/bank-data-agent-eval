@@ -135,8 +135,8 @@ for b in BRANCHES:
 # T12: percentage of a state's amount from one category (ratio_trap, hard)
 for i, s in enumerate(STATES):
     c = CATEGORIES[i % len(CATEGORIES)]
-    add("ratio_trap", "hard", "answer", f"What percentage of total transaction amount in {s} came from {c}? "
-        f"Answer as a percentage rounded to 2 decimals.",
+    add("ratio_trap", "hard", "answer", f"What percentage of total transaction amount in {s} came from the "
+        f"{c} product category? Answer as a percentage rounded to 2 decimals.",
         f"SELECT ROUND(100.0 * SUM(CASE WHEN g.category = '{c}' THEN f.amount ELSE 0 END) / SUM(f.amount), 2) "
         f"FROM fact_transaction f JOIN dim_branch v ON v.branch_id = f.branch_id "
         f"JOIN dim_product g ON g.product_id = f.product_id WHERE v.state = '{s}'")

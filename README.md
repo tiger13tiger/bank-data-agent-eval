@@ -108,8 +108,27 @@ regenerates `data/injection_set.jsonl` at 193 cases across ~24 attack types (`da
 Total: 209 golden/hard/extended cases + 193 attacks = 402, vs. 62 in v1.
 
 **v1 and v2 scores are not comparable** (different cases, different data) — see the versioning rule in
-the harness-building checklist. v1's numbers stay below for reference; a v2 real-model run (`--suite all
---repeats 3`) has not been recorded yet — run it and replace this note once it has.
+the harness-building checklist. v1's numbers stay below for reference.
+
+A `--repeats 1` smoke test on v2 (DeepSeek) passed the gate (98.4% execution accuracy, 95.0% groundedness,
+92.8% task completion, 100% safety) and, unlike v1, actually surfaced real findings instead of a flat
+100% — reviewed per the checklist's "read every failure" step before trusting the number:
+
+- **~9 business_logic/period_compare cases** (the "net amount" and "Jan→Apr growth" templates) failed
+  groundedness even though the SQL result matched gold: the model answered with a correct single-column
+  result but then added explanatory subtotals in prose (e.g. "transaction total: X, reversals: Y") that
+  were never themselves returned by an executed query — exactly what the system prompt's "don't add
+  numbers not produced by a query you ran" rule exists to catch. Not an evaluator bug; a real, if minor,
+  instruction-following miss.
+- **2 `ratio_trap` cases failed on a genuine test-design ambiguity**, not a model error: "...came from
+  {category}?" is ambiguous between `dim_branch.branch_type` and `dim_product.category` (both are real
+  columns; "Checking" happens to look like neither a branch type nor an obviously-product-only word out
+  of context). The model noticed the ambiguity itself and asked rather than guessing. Per the
+  checklist's rule against editing cases after seeing results, this was logged as a known gap and the
+  **template wording was fixed before the official `--repeats 3` run** (not after it, to avoid tuning
+  the suite to a score) — `data/build_extended_set.py`'s T12 now says "... product category?" explicitly.
+
+The official v2 run (`--suite all --repeats 3`) has not been recorded yet — run it and replace this note.
 
 ## Results v1 (demo DB, DeepSeek `deepseek-chat`, 32 golden+hard cases + 30 attacks, 3 runs, Nov 2026)
 
