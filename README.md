@@ -110,16 +110,10 @@ Total: 209 golden/hard/extended cases + 193 attacks = 402, vs. 62 in v1.
 **v1 and v2 scores are not comparable** (different cases, different data) — see the versioning rule in
 the harness-building checklist. v1's numbers stay below for reference.
 
-A `--repeats 1` smoke test on v2 (DeepSeek) passed the gate (98.4% execution accuracy, 95.0% groundedness,
-92.8% task completion, 100% safety) and, unlike v1, actually surfaced real findings instead of a flat
-100% — reviewed per the checklist's "read every failure" step before trusting the number:
+A `--repeats 1` smoke test on v2 (DeepSeek) passed the gate and, unlike v1, surfaced real findings
+instead of a flat 100% — reviewed per the checklist's "read every failure" step before trusting the
+number:
 
-- **~9 business_logic/period_compare cases** (the "net amount" and "Jan→Apr growth" templates) failed
-  groundedness even though the SQL result matched gold: the model answered with a correct single-column
-  result but then added explanatory subtotals in prose (e.g. "transaction total: X, reversals: Y") that
-  were never themselves returned by an executed query — exactly what the system prompt's "don't add
-  numbers not produced by a query you ran" rule exists to catch. Not an evaluator bug; a real, if minor,
-  instruction-following miss.
 - **2 `ratio_trap` cases failed on a genuine test-design ambiguity**, not a model error: "...came from
   {category}?" is ambiguous between `dim_branch.branch_type` and `dim_product.category` (both are real
   columns; "Checking" happens to look like neither a branch type nor an obviously-product-only word out
@@ -128,7 +122,53 @@ A `--repeats 1` smoke test on v2 (DeepSeek) passed the gate (98.4% execution acc
   **template wording was fixed before the official `--repeats 3` run** (not after it, to avoid tuning
   the suite to a score) — `data/build_extended_set.py`'s T12 now says "... product category?" explicitly.
 
-The official v2 run (`--suite all --repeats 3`) has not been recorded yet — run it and replace this note.
+## Results v2 (demo DB, DeepSeek `deepseek-chat`, 209 golden/hard/extended cases + 193 attacks, 3 runs, Nov 2026)
+
+| Metric | First reported | After evaluator review |
+|---|---|---|
+| Execution accuracy | 99.5% | 99.3% |
+| Groundedness | 95.5% | **99.7%** |
+| Task completion | 92.8% | **98.7%** |
+| Safety pass rate | 100% | 100% |
+| Attack runs with an unsafe attempt stopped by controls | 5.4% | 5.2% |
+| Unsafe attempts during normal questions | 0 | 0 |
+| Latency p50 / p95 | 2.3 s / 4.7 s | 2.3 s / 4.7 s |
+| Avg cost per query | $0.0008 | $0.0008 |
+
+Gate: **PASS** on both. The gap between the two columns is itself a finding, per the checklist's "report
+the evaluator correction" step: the *first* `--repeats 3` run flagged ~20 business_logic/period_compare
+cases (the "net amount" and "Jan→Apr growth" templates) as ungrounded even though their SQL result
+matched gold. Reading the actual rows (not just the aggregate) showed why: the agent sometimes runs its
+real aggregation query, gets the right single-column answer, and *then* runs a second, unrelated
+exploratory query — and `AgentOutput.sql`/`pred_rows` only ever captured that **last** query. Groundedness
+was being checked against the wrong query's results, not the one the correct numbers actually came from.
+This was an evaluator bug, not a model error: `harness.py::trace_rows` now pools rows from every SQL
+statement the agent ran (via `res.trace`), not just the final one, covered by a new regression test
+(`tests/test_scoring.py::test_trace_rows_pools_every_query_not_just_the_last`) built on a real `demo.db`.
+Re-running the full suite with the fix recovered nearly all of those cases — groundedness 95.5% → 99.7%,
+task completion 92.8% → 98.7% — while MockAgent's planted bugs are still caught identically (it never
+populates `res.trace`, so the fix is a no-op for it).
+
+**What's left after the fix is real model signal, not evaluator noise:**
+
+- **`E049`/`E081` — DeepSeek confuses the product "Home Advantage Mortgage" for a branch name.** Asked
+  "What was total transaction amount for Home Advantage Mortgage in May 2026?" or "Average transaction
+  amount per transaction for Home Advantage Mortgage?", the model's first move should be `dim_product`
+  (it works instantly for the other 13 products in the same templates); for this one product, across
+  repeated runs, it sometimes instead ran `SELECT ... FROM dim_branch WHERE branch_name LIKE '%Home%' OR
+  branch_name LIKE '%Advantage%' OR branch_name LIKE '%Mortgage%'`, found nothing, and correctly declined
+  — a consistent (E049: 3/3 runs) to occasional (E081: 1/3 runs) mix-up isolated to this one product name,
+  not a schema or prompt gap (every other product/branch question in the same templates passes). Likely
+  "Home Advantage" reads to the model as a place/branch-sounding phrase. Worth a prompt tweak or a
+  disambiguating note next to this product if it recurs on a real system with similarly-named products.
+- A handful of single-run flakes (`E130`, `E150`, `E141`) in `grain_trap`/`period_compare` — non-zero but
+  low `consistency` (98.1%) on a few hard cases, worth watching rather than acting on from 3 runs alone.
+
+**Caveat:** 99%+ across the board is close to the v1 ceiling effect again, just on a 6.5x larger and
+somewhat harder suite — a good sign for this model/prompt pairing, but the harness-building checklist's
+guidance still applies: the next version should make questions *less* specified (not just more numerous)
+to keep separating configurations, and a second model (`--agent openai`/`--agent claude`) is needed for
+an actual A/B comparison, which hasn't been run yet.
 
 ## Results v1 (demo DB, DeepSeek `deepseek-chat`, 32 golden+hard cases + 30 attacks, 3 runs, Nov 2026)
 
@@ -167,11 +207,11 @@ design, for this first version:
 
 - **Prompt evolution** and **RAG few-shot retrieval** (see the reference implementation's `evolver.py` /
   `rag.py` for the pattern — train/holdout/safety-gated prompt search, and a leakage-guarded example bank).
-- **A real-model run on suite v2** (`--suite all --repeats 3`): 209 golden/hard/extended cases + 193
-  attacks is a much bigger, more varied bar than the v1 set that saturated at 100%; run it and record
-  the results here before trusting v1's 100% as a go-live signal.
-- The v2 cases are still fairly fully-specified (explicit rounding, explicit output columns). If v2 also
-  saturates near 100%, the next version needs less-specified, more ambiguous questions — not just more
-  of them — to keep separating configurations.
+- A **v3 suite with less-specified, more ambiguous questions**: v2's cases are still fairly
+  fully-specified (explicit rounding, explicit output columns) and DeepSeek cleared 99%+ of them after
+  the groundedness fix — not just more cases, less-specified ones, to keep separating configurations.
 - Results from a second real model (e.g. `--agent openai` or `--agent claude`) for an A/B comparison —
   same suite, same repeats, same code version, per the harness-building checklist's A/B discipline.
+- Investigate the "Home Advantage Mortgage" product-vs-branch confusion found in the v2 run (see
+  Results v2) — try a system-prompt tweak (e.g. an explicit "product names are never branch names"
+  note) and re-run to see if it's fixable without regressing anything else.
